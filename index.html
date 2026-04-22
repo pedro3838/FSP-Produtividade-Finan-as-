@@ -164,6 +164,12 @@
       width: 100%; 
       padding: 8px 6px; 
       outline: none;
+      transition: all 0.3s ease;
+    }
+
+    .task input[type="text"].done-text {
+      text-decoration: line-through;
+      opacity: 0.5;
     }
 
     .add-task-area { 
@@ -268,7 +274,29 @@
       let currentWeek = 0;
       let agendaItems = [];
 
-      // Inicialização
+      // SALVAMENTO PERSISTENTE
+      function saveData() {
+        const payload = {
+          db: db,
+          categories: categories,
+          lastView: { month: currentMonth, week: currentWeek },
+          agenda: agendaItems
+        };
+        localStorage.setItem('flowspace_pro_data', JSON.stringify(payload));
+      }
+
+      function loadData() {
+        const raw = localStorage.getItem('flowspace_pro_data');
+        if (raw) {
+          const data = JSON.parse(raw);
+          db = data.db || {};
+          categories = data.categories || ["Estudo", "Profissional", "Saúde"];
+          currentMonth = data.lastView?.month ?? 3;
+          currentWeek = data.lastView?.week ?? 0;
+          agendaItems = data.agenda || [];
+        }
+      }
+
       function getWeeksInMonth(year, month) {
         const firstDay = new Date(year, month, 1).getDay();
         const lastDate = new Date(year, month + 1, 0).getDate();
@@ -283,9 +311,9 @@
             db[mIdx][w] = daysLabel.map(() => []);
           }
         }
+        saveData();
       }
 
-      // Gestão de Categorias
       window.manageCategories = function() {
         const action = prompt("Escolha: (1) Adicionar (2) Excluir").trim();
         if (action === "1") {
@@ -293,8 +321,14 @@
           if (n && !categories.includes(n)) { categories.push(n); renderCategorySelectors(); }
         } else if (action === "2") {
           const d = prompt("Excluir qual?\n" + categories.join(", "));
-          if (categories.includes(d)) { categories = categories.filter(c => c !== d); renderCategorySelectors(); }
+          if (categories.includes(d)) { 
+            if(confirm(`Tem certeza que deseja excluir "${d}"?`)) {
+              categories = categories.filter(c => c !== d); 
+              renderCategorySelectors(); 
+            }
+          }
         }
+        saveData();
       };
 
       function renderCategorySelectors() {
@@ -306,7 +340,6 @@
         createUI();
       }
 
-      // Funções Principais
       window.changeWeek = function(dir) {
         const weeks = getWeeksInMonth(2026, currentMonth);
         let nW = currentWeek + dir;
@@ -316,6 +349,7 @@
         initDB(currentMonth);
         document.getElementById('filterMonth').value = currentMonth;
         createUI();
+        saveData();
       };
 
       window.addTask = function(dayIdx) {
@@ -325,18 +359,22 @@
         db[currentMonth][currentWeek][dayIdx].push({ name: input.value, cat: cat, done: false });
         input.value = "";
         createUI();
+        saveData();
       };
 
       window.toggleTask = function(dIdx, tIdx) {
         db[currentMonth][currentWeek][dIdx][tIdx].done = !db[currentMonth][currentWeek][dIdx][tIdx].done;
-        updateStats();
+        createUI(); // Força re-render para aplicar classe done-text
+        saveData();
       };
 
       window.editTask = function(dIdx, tIdx, val) {
-        if(val.trim()) db[currentMonth][currentWeek][dIdx][tIdx].name = val;
+        if(val.trim()) {
+          db[currentMonth][currentWeek][dIdx][tIdx].name = val;
+          saveData();
+        }
       };
 
-      // UI e Gráfico
       const chart = new Chart(document.getElementById('chart').getContext('2d'), {
         type: 'line',
         data: {
@@ -379,7 +417,7 @@
             const row = document.createElement('div');
             row.className = 'task';
             row.innerHTML = `<input type="checkbox" ${t.done ? 'checked' : ''} onchange="toggleTask(${i}, ${tIdx})">
-                             <input type="text" value="${t.name}" onchange="editTask(${i}, ${tIdx}, this.value)">
+                             <input type="text" class="${t.done ? 'done-text' : ''}" value="${t.name}" onchange="editTask(${i}, ${tIdx}, this.value)">
                              <small style="color: #4f9cf7; font-size: 0.7rem; margin-left: 5px;">${t.cat}</small>`;
             list.appendChild(row);
           });
@@ -388,9 +426,20 @@
         updateStats();
       }
 
-      // Relógio e Agenda
-      window.addAgendaItem = () => { agendaItems.push({ id: Date.now(), text: '', time: '', notified: false }); renderAgenda(); };
-      window.updateAgenda = (id, f, v) => { const it = agendaItems.find(a=>a.id===id); if(it) it[f]=v; };
+      window.addAgendaItem = () => { 
+        agendaItems.push({ id: Date.now(), text: '', time: '', notified: false }); 
+        renderAgenda(); 
+        saveData();
+      };
+
+      window.updateAgenda = (id, f, v) => { 
+        const it = agendaItems.find(a=>a.id===id); 
+        if(it) {
+          it[f]=v; 
+          saveData();
+        }
+      };
+
       function renderAgenda() {
         const c = document.getElementById('agenda-container'); c.innerHTML = '';
         agendaItems.forEach(item => {
@@ -407,20 +456,30 @@
           document.getElementById('notif-text').textContent = it.text;
           document.getElementById('notification-popup').style.display='block';
           it.notified = true; 
+          saveData();
         } });
       }
 
       // Eventos
-      document.getElementById('filterMonth').onchange = (e) => { currentMonth = parseInt(e.target.value); currentWeek = 0; initDB(currentMonth); createUI(); };
+      document.getElementById('filterMonth').onchange = (e) => { 
+        currentMonth = parseInt(e.target.value); 
+        currentWeek = 0; 
+        initDB(currentMonth); 
+        createUI(); 
+        saveData();
+      };
       document.getElementById('filterCategory').onchange = createUI;
 
-      // Start
+      // START
+      loadData(); 
       const fMonth = document.getElementById('filterMonth');
       months.forEach((m, i) => fMonth.add(new Option(m, i)));
       fMonth.value = currentMonth;
       
       initDB(currentMonth);
       renderCategorySelectors();
+      renderAgenda();
+      
       setInterval(() => {
         const now = new Date();
         document.getElementById('real-time').textContent = now.toLocaleDateString('pt-BR', { weekday:'short', day:'numeric', month:'short', hour:'2-digit', minute:'2-digit'});
